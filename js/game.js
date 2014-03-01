@@ -16,6 +16,11 @@ var Game = function(){
 	this.players = [];
 
 	this.theta = 0;
+
+	this.meshes = [];
+
+	this.world;
+	this.bodies = [];
 };
 
 Game.prototype.init = function(dist) {
@@ -45,6 +50,7 @@ Game.prototype.init = function(dist) {
 	camera.position.z = this.origDist;
 	this.camera = camera;
 
+	this.setupWorld();
 
 	this.addLights();
 
@@ -55,6 +61,7 @@ Game.prototype.init = function(dist) {
 	this.addFootball();
 
 	this.addPlayers();
+
 };
 
 Game.prototype.addLights = function() {
@@ -98,7 +105,7 @@ Game.prototype.addFloor = function() {
 
 	var floor = new THREE.Mesh(floorGeometry, floorMaterial);
 	floor.rotation.x = 90*(Math.PI/180);
-	floor.position.y = -15;
+	floor.position.y = -11;
 	floor.receiveShadow = false;
 
 	this.scene.add(floor);
@@ -147,6 +154,10 @@ Game.prototype.addPlayers = function() {
 	var mat = new THREE.MeshPhongMaterial({ color: "#ffff00" });
 	var mat2 = new THREE.MeshPhongMaterial({ color: "#ff00ff" });
 
+	var rand = function(dim) {
+		return (Math.random()*dim - dim/2);
+	};
+
 	for (var i = 0; i < num_bots; i++) {
 		var geo = new THREE.SphereGeometry(1.5, 16, 16);
 
@@ -154,7 +165,7 @@ Game.prototype.addPlayers = function() {
 			mat = mat2;
 
 		var mesh = new THREE.Mesh(geo, mat);
-		mesh.position.y = 4.6;
+		mesh.position.y = 5;
 		var pos = this.randFieldPos();
 		mesh.position.x = pos.x;
 		mesh.position.z = pos.y;
@@ -163,14 +174,33 @@ Game.prototype.addPlayers = function() {
 
 		this.scene.add(mesh);
 		this.players.push(mesh);
+
+		var b = new OIMO.Body({
+			type: 'sphere',
+			name: 'p_'+i,
+			size: [2],
+			pos: [pos.x,mesh.position.y,pos.y],
+			move: true,
+			world: this.world,
+			config: [0.1, 5]});
+
+		this.bodies.push(b.body);
+
+		b.body.linearVelocity.x = rand(0.1);
+		b.body.linearVelocity.y = 0;
+		b.body.linearVelocity.z = rand(0.1);
+		
+		this.meshes.push(mesh);
 	}
 };
 
 Game.prototype.addFootball = function() {
 	var ballContainer = new THREE.Object3D();
 
+	var r = 3;
+
 	var texture = THREE.ImageUtils.loadTexture('textures/Football.jpg');
-	var geometry = new THREE.SphereGeometry(3, 32, 16);
+	var geometry = new THREE.SphereGeometry(r, 12, 12);
 	var material = new THREE.MeshPhongMaterial({
 		map: texture
 	});
@@ -192,37 +222,28 @@ Game.prototype.addFootball = function() {
 	ballContainer.add(arrowHelper);
 
 	this.scene.add(ballContainer);
+	this.meshes.push(ballContainer);
 
-	var self = this;
+	var b = new OIMO.Body({
+		type: 'sphere',
+		name: 'ball',
+		size: [r],
+		pos: [0,30,0],
+		move: true,
+		world: this.world,
+		config: [5, 5]});
 
-	setInterval(function(){
+	this.bodies.push(b.body);
 
-		var a = { x: ballContainer.position.x, y: ballContainer.position.z };
-		var b = self.randFieldPos();
+	b.body.linearVelocity.x = 0.05;
+	b.body.linearVelocity.y = 0;
+	b.body.linearVelocity.z = 0.1;
+	//b.body.angularVelocity.x = 3;
 
-		var aV = new THREE.Vector2(a.x, a.y) 
-		var bV = new THREE.Vector2(b.x, b.y);
-		var angle = Math.acos( aV.dot(bV) / (aV.length() * bV.length()) );
-
-		console.log(angle);
-
-		ball.rotation.z = Math.PI/6;
-
-		var tween = new TWEEN.Tween(a)
-			.to(b, 1500)
-			.easing( TWEEN.Easing.Cubic.Out )
-			.onUpdate( function () {
-				ballContainer.position.x = this.x;
-				ballContainer.position.z = this.y;
-
-				//todo: rotate properly along motion
-				// rate, direction, flight through air
-				//ball.rotation.x += 0.1;
-			} )
-			.start();
-
-	}, 2000);
+	console.log(b);
 };
+
+
 
 Game.prototype.randFieldPos = function() {
 	var randin = function(dim, pad) {
@@ -236,6 +257,78 @@ Game.prototype.randFieldPos = function() {
 	return pos;
 };
 
+//physics
+Game.prototype.setupWorld = function() {
+	var world = new OIMO.World();
+	var nG = 0;
+	world.gravity = new OIMO.Vec3(0, -0.5, 0);
+
+	var field = this.field;
+	var ground = new OIMO.Body(
+		{ size: [field.w, field.h, field.l],
+			pos: [0,0,0],
+			config: [1, 5],
+			world: world});
+
+	console.log(ground);
+
+	var ground = new OIMO.Body({size:[300, 1, 300], pos:[0,-10,0], world: world});
+
+	//walls
+	var wH = 40;
+
+	var size = [field.w,1,wH];
+	var pos = [0,0,field.l/2];
+	var rot = [90,0,0];
+	var f = new OIMO.Body({
+		size: size,
+		pos: pos,
+		rot: rot,
+		world: world});
+	this.addStaticBox(size, pos, rot);
+
+	pos = [0,0,-field.l/2];
+	var b = new OIMO.Body({
+		size: size,
+		pos: pos,
+		rot: rot,
+		world: world});
+	this.addStaticBox(size, pos, rot);
+
+	size = [wH,1,field.l];
+	rot = [0,0,90];
+
+	pos = [field.w/2,0,0];
+	var r = new OIMO.Body({
+		size: size,
+		pos: pos,
+		rot: rot,
+		world: world});
+	this.addStaticBox(size, pos, rot);
+
+	pos = [-field.w/2,0,0];
+	var l = new OIMO.Body({
+		size: size,
+		pos: pos,
+		rot: rot,
+		world: world});
+	this.addStaticBox(size, pos, rot);
+
+	this.world = world;
+};
+
+Game.prototype.addStaticBox = function(size, position, rotation) {
+	return;
+	var ToRad = Math.PI/180;
+	var geo = new THREE.CubeGeometry(1,1,1);
+	var mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: false, opacity: 0.5 });
+
+	var mesh = new THREE.Mesh( geo, mat );
+	mesh.scale.set( size[0], size[1], size[2] );
+	mesh.position.set( position[0], position[1], position[2] );
+	mesh.rotation.set( rotation[0]*ToRad, rotation[1]*ToRad, rotation[2]*ToRad );
+	this.scene.add( mesh );
+};
 
 Game.prototype.onWindowResize = function() {
 	this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -246,7 +339,40 @@ Game.prototype.onWindowResize = function() {
 
 Game.prototype.render = function(head) {
 	
+	if (started) {
+		this.world.step();
+	}
+
 	this.theta += 0.004;
+
+
+	var p, r, m, x, y, z;
+	var mtx = new THREE.Matrix4();
+	var i = this.bodies.length;
+	var mesh;
+
+	while (i--) {
+		mesh = this.meshes[i];
+
+		if (!this.bodies[i].sleeping) {
+				//console.log(this.bodies[i]);
+				m = this.bodies[i].getMatrix();
+				mtx.fromArray(m);
+				mesh.position.setFromMatrixPosition( mtx );
+				mesh.rotation.setFromRotationMatrix( mtx );
+
+				// reset position
+				if (m[13] < -100 && false) {
+						x = -100 + Math.random()*200;
+						z = -100 + Math.random()*200;
+						y = 100 + Math.random()*1000;
+						this.bodies[i].setPosition(x,y,z);
+				}
+		} else {
+		
+		}
+	}
+
 
 	var ratio = head.z/this.origDist;
 
